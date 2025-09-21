@@ -1,0 +1,81 @@
+# 編譯後的 Java 類文件
+*.class
+
+# 日誌文件
+*.log
+
+# BlueJ files
+*.ctxt
+
+# Mobile Tools for Java (J2ME)
+.mtj.tmp/
+
+# Package Files
+*.jar
+*.war
+*.ear
+*.zip
+*.tar.gz
+*.rar
+
+# virtual machine crash logs
+hs_err_pid*
+
+# Eclipse project files
+.project
+.classpath
+.settings/
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+
+# NetBeans
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+
+# VS Code
+.vscode/
+
+# Mac
+.DS_Store
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# 忽略其他不相關的目錄
+../$RECYCLE.BIN/
+../1/
+../BaiduNetdiskDownload/
+../CloudMusic/
+../Consistency-Aware-Authenticated-Learned-Index.zip
+../Consistency-Aware-Authenticated-Learned-Index/
+../Flood/
+../Hallo_World.java
+../KwDownload/
+../Learned-indexes-for-multidimensional-data-using-Z-order-curve*
+../PAPER/
+../Program\ Files\ \(x86\)/
+../Qoder/
+../Stree-Map\ data/
+../ZM/
+../dev/
+../develop/
+../paper\ code/
+../python/
+../software/
+../steam/
+../wonderfulVideos12396976500698118034/
+../基于人脸识别/
+../腾讯电脑管家截图文件/
+../腾讯电脑管家软件搬家/
+../马婷ppt/
+
+# 只包含當前項目相關文件
+# 保留 src/ 和 out/ 目錄
