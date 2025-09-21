@@ -918,14 +918,7 @@ public class AdaptiveZOrder {
     public static void main(String[] args) {
         System.out.println("=== 使用16×16网格数据集测试自适应Z-order算法 ===\n");
         
-        // // 测试8×8网格稀疏分布数据集
-        // Point2D[] sparse8x8Dataset = loadDataset("src/data/grid_8x8_sparse_dataset.csv", 50);
-        
-        // if (sparse8x8Dataset != null) {
-        //     System.out.println("=== 8×8网格稀疏分布数据集测试 ===");
-        //     testDataset(sparse8x8Dataset, "8×8网格稀疏分布数据集");
-        // }
-        
+
         // 测试10×10网格稀疏分布数据集
         Point2D[] sparse10x10Dataset = loadDataset("src/data/grid_10x10_sparse_dataset.csv", 80);
         
@@ -936,13 +929,7 @@ public class AdaptiveZOrder {
             System.out.println("无法加载10×10网格稀疏分布数据集");
         }
         
-        // // 测试8×8网格均匀分布数据集
-        // Point2D[] uniform8x8Dataset = loadDataset("src/data/grid_8x8_uniform_dataset.csv", 50);
-        
-        // if (uniform8x8Dataset != null) {
-        //     System.out.println("\n=== 8×8网格均匀分布数据集测试 ===");
-        //     testDataset(uniform8x8Dataset, "8×8网格均匀分布数据集");
-        // }
+
     }
     
     // 测试数据集的方法

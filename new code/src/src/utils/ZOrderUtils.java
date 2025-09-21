@@ -16,23 +16,19 @@ public class ZOrderUtils {
     // 使用指定位数计算Z-order（按照用户规则：从最高位开始，先x再y交替）
     public static long computeZOrderWithBits(long x, long y, int bits) {
         long z = 0;
-        
-        // 从最高位开始处理
+
         for (int i = bits - 1; i >= 0; i--) {
-            // 计算当前位组在结果中的位置（从最高位开始）
-            int groupIndex = bits - 1 - i;  // 第几组（从0开始）
-            
-            // 取x的第i位，放到偶数位置（左边）
+            // 取 x 的第 i 位，放到 2*i + 1 位置（因为从最高位开始）
             if ((x & (1L << i)) != 0) {
-                z |= (1L << (2 * groupIndex));
+                z |= (1L << (2 * i + 1));
             }
-            
-            // 取y的第i位，放到奇数位置（右边）
+
+            // 取 y 的第 i 位，放到 2*i 位置
             if ((y & (1L << i)) != 0) {
-                z |= (1L << (2 * groupIndex + 1));
+                z |= (1L << (2 * i));
             }
         }
-        
+
         return z;
     }
     
