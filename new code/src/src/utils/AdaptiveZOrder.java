@@ -5,26 +5,75 @@ import java.util.*;
 
 public class AdaptiveZOrder {
     
-    // 单元格类
-    public static class Cell {
+    // 自适应Z-order树节点类
+    public static class AdaptiveZOrderNode {
+        // 空间边界
         public long minX, maxX, minY, maxY;
-        public List<Point2D> points;
-        public Point2D center;
         
-        public Cell(long minX, long maxX, long minY, long maxY) {
+        // 节点属性
+        public int depth;                           // 节点深度
+        public int optimalBits;                     // 当前层级的最优位数
+        public long zOrderValue;                    // 节点的Z-order值
+        public boolean isLeaf;                      // 是否为叶子节点
+        
+        // 数据存储
+        public List<Point2D> points;               // 存储的数据点
+        public Point2D center;                     // 节点中心点
+        
+        // 树结构
+        public AdaptiveZOrderNode parent;          // 父节点
+        public List<AdaptiveZOrderNode> children;  // 子节点列表
+        
+        // 学习索引相关信息
+        public LinearFitResult fitResult;          // 当前节点的线性拟合结果
+        public long[] zOrderArray;                 // 节点内数据点的Z地址数组（已排序）
+        public Point2D[] sortedPoints;             // 按Z地址排序的数据点数组
+        public boolean hasLearnedModel;            // 是否已构建学习模型
+        
+        // 构造函数：根节点
+        public AdaptiveZOrderNode(long minX, long maxX, long minY, long maxY) {
             this.minX = minX;
             this.maxX = maxX;
             this.minY = minY;
             this.maxY = maxY;
+            this.depth = 0;
+            this.parent = null;
+            this.children = new ArrayList<>();
             this.points = new ArrayList<>();
+            this.isLeaf = false;
+            this.zOrderValue = 0; // 根节点Z值为0
+            this.hasLearnedModel = false;
         }
         
+        // 构造函数：子节点
+        public AdaptiveZOrderNode(long minX, long maxX, long minY, long maxY, 
+                                AdaptiveZOrderNode parent, int depth, long zOrderValue) {
+            this.minX = minX;
+            this.maxX = maxX;
+            this.minY = minY;
+            this.maxY = maxY;
+            this.depth = depth;
+            this.parent = parent;
+            this.children = new ArrayList<>();
+            this.points = new ArrayList<>();
+            this.isLeaf = false;
+            this.zOrderValue = zOrderValue;
+            this.hasLearnedModel = false;
+        }
+        
+        // 添加数据点
+        public void addPoint(Point2D point) {
+            points.add(point);
+        }
+        
+        // 检查节点是否有数据
         public boolean hasData() {
             return !points.isEmpty();
         }
         
+        // 获取节点中心点
         public Point2D getCenter() {
-            if (center == null && hasData()) {
+            if (center == null) {
                 long centerX = (minX + maxX) / 2;
                 long centerY = (minY + maxY) / 2;
                 center = new Point2D(centerX, centerY);
@@ -32,14 +81,545 @@ public class AdaptiveZOrder {
             return center;
         }
         
-        public void addPoint(Point2D point) {
-            points.add(point);
+        // 添加子节点
+        public void addChild(AdaptiveZOrderNode child) {
+            children.add(child);
+            child.parent = this;
+        }
+        
+        // 设置为叶子节点
+        public void setAsLeaf(int finalOptimalBits) {
+            this.isLeaf = true;
+            this.optimalBits = finalOptimalBits;
+            // 叶子节点需要构建学习模型
+            buildLearnedModel();
+        }
+        
+        // 获取节点的空间范围大小
+        public long getSpaceSize() {
+            return (maxX - minX + 1) * (maxY - minY + 1);
+        }
+        
+        // 获取节点路径（从根到当前节点）
+        public String getNodePath() {
+            if (parent == null) {
+                return "Root";
+            }
+            return parent.getNodePath() + " -> Node" + depth + "(Z=" + zOrderValue + ")";
+        }
+        
+        // 判断点是否在节点范围内
+        public boolean containsPoint(Point2D point) {
+            return point.x >= minX && point.x <= maxX && 
+                   point.y >= minY && point.y <= maxY;
+        }
+        
+        // 获取所有叶子节点
+        public List<AdaptiveZOrderNode> getAllLeaves() {
+            List<AdaptiveZOrderNode> leaves = new ArrayList<>();
+            if (isLeaf) {
+                leaves.add(this);
+            } else {
+                for (AdaptiveZOrderNode child : children) {
+                    leaves.addAll(child.getAllLeaves());
+                }
+            }
+            return leaves;
+        }
+        
+        // 构建学习模型（为节点创建线性拟合模型和Z地址数组）
+        public void buildLearnedModel() {
+            if (points.isEmpty()) {
+                hasLearnedModel = false;
+                return;
+            }
+            
+            System.out.println("    构建节点 " + this + " 的学习模型...");
+            
+            // 第一步：计算所有数据点在当前层级的Z地址
+            List<ZOrderPointPair> zOrderPairs = new ArrayList<>();
+            System.out.println("      使用当前节点最优位数 " + optimalBits + " 位计算Z地址:");
+            
+            for (Point2D point : points) {
+                // 使用当前节点的最优位数计算Z地址
+                long zOrder = ZOrderUtils.computeZOrderWithBits(point, optimalBits);
+                zOrderPairs.add(new ZOrderPointPair(zOrder, point));
+                
+                // 显示Z地址计算过程（前10个点）
+                if (zOrderPairs.size() <= 10) {
+                    String binary = String.format("%" + (optimalBits * 2) + "s", Long.toBinaryString(zOrder)).replace(' ', '0');
+                    System.out.println("        " + point + " -> Z=" + zOrder + " (二进制:" + binary + ")");
+                }
+            }
+            
+            if (points.size() > 10) {
+                System.out.println("        ... 还有" + (points.size() - 10) + "个点");
+            }
+            
+            // 第二步：按Z地址排序
+            zOrderPairs.sort((a, b) -> Long.compare(a.zOrder, b.zOrder));
+            
+            // 第三步：构建Z地址数组和排序后的点数组
+            zOrderArray = new long[zOrderPairs.size()];
+            sortedPoints = new Point2D[zOrderPairs.size()];
+            
+            for (int i = 0; i < zOrderPairs.size(); i++) {
+                zOrderArray[i] = zOrderPairs.get(i).zOrder;
+                sortedPoints[i] = zOrderPairs.get(i).point;
+            }
+            
+            // 第四步：构建线性拟合模型 (position = a * z_order + b)
+            if (zOrderArray.length >= 2) {
+                fitResult = buildLinearModel(zOrderArray);
+                System.out.println("      线性模型: position = " + 
+                                 String.format("%.6f", fitResult.slope) + " * z_order + " + 
+                                 String.format("%.6f", fitResult.intercept) + 
+                                 " (R² = " + String.format("%.4f", fitResult.rSquared) + ")");
+            } else {
+                // 数据点太少，创建简单模型
+                fitResult = new LinearFitResult(0, 0, 1.0);
+                System.out.println("      数据点过少，使用简单模型");
+            }
+            
+            hasLearnedModel = true;
+            
+            System.out.println("      学习模型构建完成: " + zOrderArray.length + " 个数据点");
+            System.out.println("      当前层级Z地址范围: [" + zOrderArray[0] + ", " + zOrderArray[zOrderArray.length-1] + "]");
+            System.out.println("      排序后的Z地址序列:");
+            for (int i = 0; i < Math.min(10, zOrderArray.length); i++) {
+                String binary = String.format("%" + (optimalBits * 2) + "s", Long.toBinaryString(zOrderArray[i])).replace(' ', '0');
+                System.out.println("        位置" + i + ": Z地址=" + zOrderArray[i] + " (二进制:" + binary + ") 包含1个点");
+            }
+            if (zOrderArray.length > 10) {
+                System.out.println("        ... 还有" + (zOrderArray.length - 10) + "个Z地址");
+            }
+        }
+        
+        // 为非叶子节点构建学习模型（基于子节点的Z地址范围）
+        public void buildInternalNodeModel() {
+            if (isLeaf || children.isEmpty()) {
+                return;
+            }
+            
+            System.out.println("    构建内部节点 " + this + " 的学习模型...");
+            
+            // 收集所有子节点的Z地址范围
+            List<ZOrderRangePair> childRanges = new ArrayList<>();
+            for (int i = 0; i < children.size(); i++) {
+                AdaptiveZOrderNode child = children.get(i);
+                if (child.hasLearnedModel && child.zOrderArray != null && child.zOrderArray.length > 0) {
+                    long minZ = child.zOrderArray[0];
+                    long maxZ = child.zOrderArray[child.zOrderArray.length - 1];
+                    childRanges.add(new ZOrderRangePair(child.zOrderValue, i, minZ, maxZ));
+                }
+            }
+            
+            if (childRanges.size() >= 2) {
+                // 按子节点的Z地址排序
+                childRanges.sort((a, b) -> Long.compare(a.nodeZOrder, b.nodeZOrder));
+                
+                // 构建内部节点的学习模型：child_index = f(z_order)
+                long[] zOrders = new long[childRanges.size()];
+                for (int i = 0; i < childRanges.size(); i++) {
+                    zOrders[i] = childRanges.get(i).nodeZOrder;
+                }
+                
+                fitResult = buildLinearModel(zOrders);
+                hasLearnedModel = true;
+                
+                System.out.println("      内部节点模型: child_index = " + 
+                                 String.format("%.6f", fitResult.slope) + " * z_order + " + 
+                                 String.format("%.6f", fitResult.intercept) + 
+                                 " (R² = " + String.format("%.4f", fitResult.rSquared) + ")");
+            }
+        }
+        
+        // 构建线性模型的通用方法
+        private LinearFitResult buildLinearModel(long[] zOrders) {
+            int n = zOrders.length;
+            if (n < 2) {
+                return new LinearFitResult(0, 0, 1.0);
+            }
+            
+            // 线性回归：position = a * z_order + b
+            double sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
+            
+            for (int i = 0; i < n; i++) {
+                double x = zOrders[i];  // Z地址
+                double y = i;           // 位置索引
+                
+                sumX += x;
+                sumY += y;
+                sumXY += x * y;
+                sumXX += x * x;
+            }
+            
+            // 计算斜率和截距
+            double denominator = n * sumXX - sumX * sumX;
+            if (Math.abs(denominator) < 1e-10) {
+                return new LinearFitResult(0, 0, 0);
+            }
+            
+            double slope = (n * sumXY - sumX * sumY) / denominator;
+            double intercept = (sumY - slope * sumX) / n;
+            
+            // 计算R²
+            double yMean = sumY / n;
+            double ssTotal = 0, ssResidual = 0;
+            
+            for (int i = 0; i < n; i++) {
+                double x = zOrders[i];
+                double y = i;
+                double yPredicted = slope * x + intercept;
+                
+                ssTotal += (y - yMean) * (y - yMean);
+                ssResidual += (y - yPredicted) * (y - yPredicted);
+            }
+            
+            double rSquared = Math.abs(ssTotal) < 1e-10 ? 1.0 : 1 - (ssResidual / ssTotal);
+            
+            return new LinearFitResult(slope, intercept, rSquared);
+        }
+        
+        // 使用学习模型进行预测查询
+        public int predictPosition(long queryZOrder) {
+            if (!hasLearnedModel || fitResult == null) {
+                return -1; // 模型不可用
+            }
+            
+            double predictedPos = fitResult.slope * queryZOrder + fitResult.intercept;
+            return Math.max(0, Math.min((int)Math.round(predictedPos), 
+                                      zOrderArray != null ? zOrderArray.length - 1 : children.size() - 1));
+        }
+        
+        // 在节点内进行精确查找
+        public List<Point2D> exactSearch(long targetZOrder) {
+            List<Point2D> results = new ArrayList<>();
+            
+            if (!isLeaf || !hasLearnedModel || zOrderArray == null) {
+                return results;
+            }
+            
+            // 使用学习模型预测位置
+            int predictedPos = predictPosition(targetZOrder);
+            
+            // 在预测位置附近进行二分查找
+            int left = Math.max(0, predictedPos - 3); // 允许一定误差范围
+            int right = Math.min(zOrderArray.length - 1, predictedPos + 3);
+            
+            // 在范围内查找所有匹配的Z地址
+            for (int i = left; i <= right; i++) {
+                if (zOrderArray[i] == targetZOrder) {
+                    results.add(sortedPoints[i]);
+                }
+            }
+            
+            return results;
+        }
+        
+        // 辅助类：Z地址和点的配对
+        private static class ZOrderPointPair {
+            long zOrder;
+            Point2D point;
+            
+            ZOrderPointPair(long zOrder, Point2D point) {
+                this.zOrder = zOrder;
+                this.point = point;
+            }
+        }
+        
+        // 辅助类：子节点Z地址范围
+        private static class ZOrderRangePair {
+            long nodeZOrder;
+            int childIndex;
+            long minZ, maxZ;
+            
+            ZOrderRangePair(long nodeZOrder, int childIndex, long minZ, long maxZ) {
+                this.nodeZOrder = nodeZOrder;
+                this.childIndex = childIndex;
+                this.minZ = minZ;
+                this.maxZ = maxZ;
+            }
+        }
+        
+        // 获取树的统计信息
+        public TreeStats getTreeStats() {
+            TreeStats stats = new TreeStats();
+            collectStats(stats);
+            return stats;
+        }
+        
+        private void collectStats(TreeStats stats) {
+            stats.totalNodes++;
+            
+            if (isLeaf) {
+                // 只在叶子节点计算数据点，避免重复计算
+                stats.totalPoints += points.size();
+                stats.leafNodes++;
+                stats.maxDepth = Math.max(stats.maxDepth, depth);
+                if (stats.minDepth == -1 || depth < stats.minDepth) {
+                    stats.minDepth = depth;
+                }
+            } else {
+                stats.internalNodes++;
+                for (AdaptiveZOrderNode child : children) {
+                    child.collectStats(stats);
+                }
+            }
         }
         
         @Override
         public String toString() {
-            return "Cell[" + minX + "," + maxX + "]x[" + minY + "," + maxY + "]";
+            return String.format("Node[D%d, Z=%d, %s, %d点, %s]", 
+                               depth, zOrderValue, 
+                               "Space[" + minX + "," + maxX + "]x[" + minY + "," + maxY + "]",
+                               points.size(), 
+                               isLeaf ? "叶子" : children.size() + "子");
         }
+    }
+    
+    // 树统计信息类
+    public static class TreeStats {
+        public int totalNodes = 0;
+        public int leafNodes = 0;
+        public int internalNodes = 0;
+        public int totalPoints = 0;
+        public int maxDepth = 0;
+        public int minDepth = -1;
+        
+        @Override
+        public String toString() {
+            return String.format("TreeStats{总节点=%d, 叶子节点=%d, 内部节点=%d, 总数据点=%d, 最大深度=%d, 最小深度=%d}",
+                               totalNodes, leafNodes, internalNodes, totalPoints, maxDepth, minDepth);
+        }
+    }
+    
+    // 自适应Z-order树类
+    public static class AdaptiveZOrderTree {
+        private AdaptiveZOrderNode root;
+        private Point2D[] originalData;
+        private int globalOptimalBits;
+        
+        public AdaptiveZOrderTree(Point2D[] points) {
+            this.originalData = points.clone();
+            buildTree(points);
+        }
+        
+        // 构建树
+        private void buildTree(Point2D[] points) {
+            if (points.length == 0) {
+                return;
+            }
+            
+            // 计算数据边界
+            long minX = Arrays.stream(points).mapToLong(p -> p.x).min().orElse(0);
+            long maxX = Arrays.stream(points).mapToLong(p -> p.x).max().orElse(0);
+            long minY = Arrays.stream(points).mapToLong(p -> p.y).min().orElse(0);
+            long maxY = Arrays.stream(points).mapToLong(p -> p.y).max().orElse(0);
+            
+            System.out.println("=== 构建自适应Z-order树 ===");
+            System.out.println("数据范围: X[" + minX + ", " + maxX + "], Y[" + minY + ", " + maxY + "]");
+            
+            // 创建根节点
+            root = new AdaptiveZOrderNode(minX, maxX, minY, maxY);
+            
+            // 将所有点添加到根节点
+            for (Point2D point : points) {
+                root.addPoint(point);
+            }
+            
+            // 首先计算全局最优位数
+            this.globalOptimalBits = determineOptimalBits(points);
+            System.out.println("全局最优位数: " + this.globalOptimalBits);
+            
+            // 递归构建树
+            buildSubTree(root, points, minX, maxX, minY, maxY, 0);
+            
+            // 为所有节点构建学习模型
+            System.out.println("\n=== 构建学习模型 ===");
+            buildAllLearnedModels(root);
+            
+            System.out.println("树构建完成！");
+            printTreeStats();
+        }
+        
+        // 递归构建子树
+        private void buildSubTree(AdaptiveZOrderNode node, Point2D[] points, 
+                                long minX, long maxX, long minY, long maxY, int depth) {
+            
+            String indent = "  ".repeat(depth);
+            System.out.println(indent + "构建节点: " + node);
+            
+            // 如果父节点已经达到全局最大位数，直接设为叶子节点
+            if (node.parent != null && node.parent.optimalBits >= this.globalOptimalBits) {
+                System.out.println(indent + "父节点已达到全局最大位数(" + this.globalOptimalBits + ")，直接设为叶子节点");
+                node.setAsLeaf(this.globalOptimalBits);
+                return;
+            }
+            
+            // 使用原有的递归算法逻辑
+            if (depth > 8) {
+                System.out.println(indent + "达到最大深度，设为叶子节点");
+                node.setAsLeaf(1);
+                return;
+            }
+            
+            if (points.length <= 4) {
+                System.out.println(indent + "数据点过少，设为叶子节点");
+                node.setAsLeaf(testDirectLinearFit(points, depth, indent));
+                return;
+            }
+            
+            long rangeX = maxX - minX;
+            long rangeY = maxY - minY;
+            if (rangeX <= 1 && rangeY <= 1) {
+                System.out.println(indent + "空间范围过小，设为叶子节点");
+                node.setAsLeaf(1);
+                return;
+            }
+            
+            // 使用全局最大位数（根据整个数据集的范围计算）
+            int globalMaxBits = this.globalOptimalBits;
+            
+            // 从上一层的最优位数+1开始测试，避免重复测试
+            int startFromBits = (depth > 0 && node.parent != null) ? node.parent.optimalBits + 1 : 1;
+            
+            int optimalBits = testBinaryProgression(points, minX, maxX, minY, maxY, 
+                                                  globalMaxBits, depth, indent, startFromBits);
+            node.optimalBits = optimalBits;
+            
+            if (optimalBits <= 0 || optimalBits >= this.globalOptimalBits) {
+                System.out.println(indent + "最优位数不适合继续分割或已达到全局最大位数，设为叶子节点");
+                node.setAsLeaf(Math.max(1, optimalBits));
+                return;
+            }
+            
+            // 按最优位数分组点，创建子节点
+            Map<Long, List<Point2D>> cellGroups = groupPointsByZOrder(points, minX, maxX, minY, maxY, 
+                                                                     globalMaxBits, optimalBits);
+            
+            if (cellGroups.size() <= 1) {
+                System.out.println(indent + "分组结果不理想，设为叶子节点");
+                node.setAsLeaf(optimalBits);
+                return;
+            }
+            
+            // 为每个分组创建子节点
+            for (Map.Entry<Long, List<Point2D>> entry : cellGroups.entrySet()) {
+                Long zOrder = entry.getKey();
+                List<Point2D> cellPoints = entry.getValue();
+                
+                if (cellPoints.isEmpty()) continue;
+                
+                // 计算子节点的空间边界
+                long cellMinX = cellPoints.stream().mapToLong(p -> p.x).min().orElse(minX);
+                long cellMaxX = cellPoints.stream().mapToLong(p -> p.x).max().orElse(maxX);
+                long cellMinY = cellPoints.stream().mapToLong(p -> p.y).min().orElse(minY);
+                long cellMaxY = cellPoints.stream().mapToLong(p -> p.y).max().orElse(maxY);
+                
+                // 创建子节点
+                AdaptiveZOrderNode childNode = new AdaptiveZOrderNode(
+                    cellMinX, cellMaxX, cellMinY, cellMaxY, node, depth + 1, zOrder
+                );
+                
+                // 添加数据点到子节点
+                for (Point2D point : cellPoints) {
+                    childNode.addPoint(point);
+                }
+                
+                node.addChild(childNode);
+                
+                // 递归构建子节点
+                if (cellPoints.size() > 4 && !canFitWithLinearModel(cellPoints)) {
+                    Point2D[] cellArray = cellPoints.toArray(new Point2D[0]);
+                    buildSubTree(childNode, cellArray, cellMinX, cellMaxX, cellMinY, cellMaxY, depth + 1);
+                } else {
+                    System.out.println(indent + "  子节点可线性拟合，设为叶子节点");
+                    childNode.setAsLeaf(optimalBits);
+                }
+            }
+            
+            System.out.println(indent + "节点构建完成，共" + node.children.size() + "个子节点");
+        }
+        
+        // 为所有节点构建学习模型（后序遍历：先构建叶子节点，再构建内部节点）
+        private void buildAllLearnedModels(AdaptiveZOrderNode node) {
+            if (node == null) return;
+            
+            // 先递归为所有子节点构建模型
+            for (AdaptiveZOrderNode child : node.children) {
+                buildAllLearnedModels(child);
+            }
+            
+            // 然后为当前节点构建模型
+            if (node.isLeaf) {
+                // 叶子节点已在setAsLeaf中构建，这里可以跳过或重新构建
+                if (!node.hasLearnedModel) {
+                    node.buildLearnedModel();
+                }
+            } else {
+                // 内部节点基于子节点构建模型
+                node.buildInternalNodeModel();
+            }
+        }
+        
+        
+        // 获取根节点
+        public AdaptiveZOrderNode getRoot() {
+            return root;
+        }
+        
+        // 打印树的统计信息
+        public void printTreeStats() {
+            if (root == null) {
+                System.out.println("树为空");
+                return;
+            }
+            
+            TreeStats stats = root.getTreeStats();
+            System.out.println("\n=== 自适应Z-order树统计信息 ===");
+            System.out.println(stats);
+            System.out.println("全局最优位数: " + globalOptimalBits);
+            
+            // 显示叶子节点信息
+            List<AdaptiveZOrderNode> leaves = root.getAllLeaves();
+            System.out.println("\n叶子节点详情:");
+            for (int i = 0; i < Math.min(5, leaves.size()); i++) {
+                AdaptiveZOrderNode leaf = leaves.get(i);
+                System.out.println("  " + leaf);
+            }
+            if (leaves.size() > 5) {
+                System.out.println("  ... 还有" + (leaves.size() - 5) + "个叶子节点");
+            }
+        }
+        
+        // 打印树结构
+        public void printTreeStructure() {
+            if (root == null) {
+                System.out.println("树为空");
+                return;
+            }
+            
+            System.out.println("\n=== 自适应Z-order树结构 ===");
+            printNodeStructure(root, "");
+        }
+        
+        private void printNodeStructure(AdaptiveZOrderNode node, String prefix) {
+            System.out.println(prefix + node);
+            
+            if (!node.isLeaf) {
+                for (int i = 0; i < node.children.size(); i++) {
+                    boolean isLast = (i == node.children.size() - 1);
+                    String childPrefix = prefix + (isLast ? "└── " : "├── ");
+                    String nextPrefix = prefix + (isLast ? "    " : "│   ");
+                    
+                    System.out.print(childPrefix);
+                    printNodeStructure(node.children.get(i), nextPrefix);
+                }
+            }
+        }
+        
+        // 范围查询（基于树结构）
     }
     
     // 线性拟合结果
@@ -914,19 +1494,174 @@ public class AdaptiveZOrder {
         return new LinearFitResult(slope, intercept, rSquared);
     }
     
+    // 创建自适应Z-order树的便捷方法
+    public static AdaptiveZOrderTree createAdaptiveZOrderTree(Point2D[] points) {
+        return new AdaptiveZOrderTree(points);
+    }
+    
+    // 测试树结构功能
+    public static void testTreeStructure(Point2D[] dataset, String datasetName) {
+        System.out.println("\n=== " + datasetName + " 树结构测试 ===");
+        
+        // 创建自适应Z-order树
+        System.out.println("开始构建自适应Z-order树...");
+        long startTime = System.nanoTime();
+        AdaptiveZOrderTree tree = createAdaptiveZOrderTree(dataset);
+        long endTime = System.nanoTime();
+        
+        System.out.println("树构建完成，耗时: " + (endTime - startTime) / 1000000.0 + "ms");
+        
+        // 打印树结构（仅显示前几层）
+        tree.printTreeStructure();
+        
+        
+        // 显示树的学习模型统计
+        System.out.println("\n=== 学习模型统计 ===");
+        printLearnedModelStats(tree.getRoot());
+        
+        // 展示分层Z地址概念
+        System.out.println("\n=== 分层Z地址概念演示 ===");
+        demonstrateHierarchicalZOrder(tree.getRoot(), 0);
+    }
+    
+    // 演示分层Z地址概念
+    public static void demonstrateHierarchicalZOrder(AdaptiveZOrderNode node, int maxDepth) {
+        if (node == null || node.depth > maxDepth) return;
+        
+        String indent = "  ".repeat(node.depth);
+        System.out.println(indent + "层级" + node.depth + " [最优位数=" + node.optimalBits + "位]:");
+        
+        if (node.isLeaf && node.hasLearnedModel && node.zOrderArray != null) {
+            System.out.println(indent + "  叶子节点存储的是基于" + node.optimalBits + "位编码的Z地址:");
+            
+            // 选择几个代表性的点来展示
+            for (int i = 0; i < Math.min(3, node.zOrderArray.length); i++) {
+                Point2D point = node.sortedPoints[i];
+                long nodeZOrder = node.zOrderArray[i];
+                
+                System.out.println(indent + "    数据点" + point + ":");
+                System.out.println(indent + "      当前层级(" + node.optimalBits + "位): Z=" + nodeZOrder + 
+                                 " (二进制:" + String.format("%" + (node.optimalBits * 2) + "s", 
+                                 Long.toBinaryString(nodeZOrder)).replace(' ', '0') + ")");
+                
+                // 对比不同位数下的Z地址
+                for (int bits = 1; bits <= 4; bits++) {
+                    if (bits != node.optimalBits) {
+                        long otherZOrder = ZOrderUtils.computeZOrderWithBits(point, bits);
+                        String binary = String.format("%" + (bits * 2) + "s", Long.toBinaryString(otherZOrder)).replace(' ', '0');
+                        System.out.println(indent + "      如果用" + bits + "位编码: Z=" + otherZOrder + 
+                                         " (二进制:" + binary + ")");
+                    }
+                }
+                System.out.println(indent + "      → 可见不同层级使用不同位数得到不同的Z地址");
+            }
+            
+            if (node.zOrderArray.length > 3) {
+                System.out.println(indent + "    ... 还有" + (node.zOrderArray.length - 3) + "个点");
+            }
+        } else if (!node.isLeaf) {
+            System.out.println(indent + "  内部节点，包含" + node.children.size() + "个子节点");
+            
+            // 递归展示子节点
+            for (AdaptiveZOrderNode child : node.children) {
+                demonstrateHierarchicalZOrder(child, maxDepth);
+            }
+        }
+    }
+    
+    // 打印学习模型统计信息
+    public static void printLearnedModelStats(AdaptiveZOrderNode node) {
+        if (node == null) return;
+        
+        LearnedModelStats stats = new LearnedModelStats();
+        collectLearnedModelStats(node, stats);
+        
+        System.out.println("学习模型统计:");
+        System.out.println("  总节点数: " + stats.totalNodes);
+        System.out.println("  有学习模型的节点: " + stats.nodesWithModel);
+        System.out.println("  叶子节点数: " + stats.leafNodes);
+        System.out.println("  有模型的叶子节点: " + stats.leafNodesWithModel);
+        System.out.println("  内部节点数: " + stats.internalNodes);
+        System.out.println("  有模型的内部节点: " + stats.internalNodesWithModel);
+        System.out.println("  平均模型R²: " + String.format("%.4f", stats.totalRSquared / Math.max(1, stats.nodesWithModel)));
+        System.out.println("  总数据点数: " + stats.totalDataPoints);
+        
+        if (stats.leafNodesWithModel > 0) {
+            System.out.println("  平均每个叶子节点数据点: " + String.format("%.2f", (double)stats.totalDataPoints / stats.leafNodesWithModel));
+        }
+    }
+    
+    private static void collectLearnedModelStats(AdaptiveZOrderNode node, LearnedModelStats stats) {
+        if (node == null) return;
+        
+        stats.totalNodes++;
+        
+        if (node.hasLearnedModel) {
+            stats.nodesWithModel++;
+            if (node.fitResult != null) {
+                stats.totalRSquared += node.fitResult.rSquared;
+            }
+        }
+        
+        if (node.isLeaf) {
+            stats.leafNodes++;
+            if (node.hasLearnedModel) {
+                stats.leafNodesWithModel++;
+                if (node.zOrderArray != null) {
+                    stats.totalDataPoints += node.zOrderArray.length;
+                }
+            }
+        } else {
+            stats.internalNodes++;
+            if (node.hasLearnedModel) {
+                stats.internalNodesWithModel++;
+            }
+            
+            // 递归统计子节点
+            for (AdaptiveZOrderNode child : node.children) {
+                collectLearnedModelStats(child, stats);
+            }
+        }
+    }
+    
+    // 学习模型统计信息类
+    static class LearnedModelStats {
+        int totalNodes = 0;
+        int nodesWithModel = 0;
+        int leafNodes = 0;
+        int leafNodesWithModel = 0;
+        int internalNodes = 0;
+        int internalNodesWithModel = 0;
+        double totalRSquared = 0.0;
+        int totalDataPoints = 0;
+    }
+    
     // 测试方法
     public static void main(String[] args) {
-        System.out.println("=== 使用16×16网格数据集测试自适应Z-order算法 ===\n");
+        System.out.println("=== 自适应Z-order树结构测试 ===\n");
         
-
         // 测试10×10网格稀疏分布数据集
         Point2D[] sparse10x10Dataset = loadDataset("src/data/grid_10x10_sparse_dataset.csv", 80);
         
         if (sparse10x10Dataset != null) {
             System.out.println("\n=== 10×10网格稀疏分布数据集测试 ===");
             testDataset(sparse10x10Dataset, "10×10网格稀疏分布数据集");
+            
+            // 测试树结构功能
+            testTreeStructure(sparse10x10Dataset, "10×10网格稀疏分布数据集");
         } else {
             System.out.println("无法加载10×10网格稀疏分布数据集");
+            
+            // 创建一个简单的测试数据集
+            System.out.println("\n=== 使用简单测试数据集 ===");
+            Point2D[] testData = {
+                new Point2D(1, 1), new Point2D(2, 1), new Point2D(3, 1),
+                new Point2D(1, 2), new Point2D(2, 2), new Point2D(3, 2),
+                new Point2D(1, 3), new Point2D(2, 3), new Point2D(3, 3),
+                new Point2D(5, 5), new Point2D(6, 6), new Point2D(7, 7)
+            };
+            
+            testTreeStructure(testData, "简单测试数据集");
         }
         
 
