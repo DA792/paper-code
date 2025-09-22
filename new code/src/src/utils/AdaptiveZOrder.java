@@ -428,9 +428,10 @@ public class AdaptiveZOrder {
                 root.addPoint(point);
             }
             
-            // 首先计算全局最优位数
-            this.globalOptimalBits = determineOptimalBits(points);
-            System.out.println("全局最优位数: " + this.globalOptimalBits);
+            // 首先计算全局最大位数（基于坐标范围）
+            long maxCoord = Math.max(maxX, maxY);
+            this.globalOptimalBits = (int) Math.ceil(Math.log(maxCoord + 1) / Math.log(2));
+            System.out.println("全局最大位数（基于坐标范围[0," + maxCoord + "]）: " + this.globalOptimalBits);
             
             // 递归构建树
             buildSubTree(root, points, minX, maxX, minY, maxY, 0);
@@ -464,19 +465,9 @@ public class AdaptiveZOrder {
                 return;
             }
             
-            if (points.length <= 4) {
-                System.out.println(indent + "数据点过少，设为叶子节点");
-                node.setAsLeaf(testDirectLinearFit(points, depth, indent));
-                return;
-            }
+            // 移除数据点数量限制，所有节点都应该测试到全局最大位数
             
-            long rangeX = maxX - minX;
-            long rangeY = maxY - minY;
-            if (rangeX <= 1 && rangeY <= 1) {
-                System.out.println(indent + "空间范围过小，设为叶子节点");
-                node.setAsLeaf(1);
-                return;
-            }
+            // 移除空间范围限制，所有节点都应该测试到全局最大位数
             
             // 使用全局最大位数（根据整个数据集的范围计算）
             int globalMaxBits = this.globalOptimalBits;
@@ -529,14 +520,9 @@ public class AdaptiveZOrder {
                 
                 node.addChild(childNode);
                 
-                // 递归构建子节点
-                if (cellPoints.size() > 4 && !canFitWithLinearModel(cellPoints)) {
-                    Point2D[] cellArray = cellPoints.toArray(new Point2D[0]);
-                    buildSubTree(childNode, cellArray, cellMinX, cellMaxX, cellMinY, cellMaxY, depth + 1);
-                } else {
-                    System.out.println(indent + "  子节点可线性拟合，设为叶子节点");
-                    childNode.setAsLeaf(optimalBits);
-                }
+                // 子节点继续递归，让它们自己计算最优位数
+                Point2D[] cellArray = cellPoints.toArray(new Point2D[0]);
+                buildSubTree(childNode, cellArray, cellMinX, cellMaxX, cellMinY, cellMaxY, depth + 1);
             }
             
             System.out.println(indent + "节点构建完成，共" + node.children.size() + "个子节点");
@@ -796,8 +782,9 @@ public class AdaptiveZOrder {
             }
             
             if (uniqueZOrders.size() < 2) {
-                System.out.println(indent + "Z地址种类不足，使用上一个位数: " + lastGoodBits);
-                return lastGoodBits;
+                System.out.println(indent + "Z地址种类不足(" + uniqueZOrders.size() + "个)，说明完美拟合，继续测试下一位数");
+                lastGoodBits = currentBits;  // 记录当前位数为可接受
+                continue;  // 跳过当前位数，继续测试
             }
             
             // 进行线性拟合：y = 位置索引, x = Z地址值
@@ -820,9 +807,9 @@ public class AdaptiveZOrder {
                 System.out.println(indent + "✓ 预测质量: 可接受（最大误差≤2个位置）");
                 lastGoodBits = currentBits;
                 
-                // 如果已经达到最大位数（4位），直接返回，不需要继续递归
-                if (currentBits >= 4) {
-                    System.out.println(indent + "已达到最大位数(4位)，停止测试和递归，返回: " + currentBits);
+                // 如果已经达到最大位数，直接返回，不需要继续递归
+                if (currentBits >= maxBitsNeeded) {
+                    System.out.println(indent + "已达到最大位数(" + maxBitsNeeded + "位)，停止测试和递归，返回: " + currentBits);
                     return currentBits;
                 }
             } else {
@@ -1521,7 +1508,7 @@ public class AdaptiveZOrder {
         
         // 展示分层Z地址概念
         System.out.println("\n=== 分层Z地址概念演示 ===");
-        demonstrateHierarchicalZOrder(tree.getRoot(), 0);
+        demonstrateHierarchicalZOrder(tree.getRoot(), 1);
     }
     
     // 演示分层Z地址概念
@@ -1532,35 +1519,35 @@ public class AdaptiveZOrder {
         System.out.println(indent + "层级" + node.depth + " [最优位数=" + node.optimalBits + "位]:");
         
         if (node.isLeaf && node.hasLearnedModel && node.zOrderArray != null) {
-            System.out.println(indent + "  叶子节点存储的是基于" + node.optimalBits + "位编码的Z地址:");
-            
-            // 选择几个代表性的点来展示
-            for (int i = 0; i < Math.min(3, node.zOrderArray.length); i++) {
-                Point2D point = node.sortedPoints[i];
-                long nodeZOrder = node.zOrderArray[i];
-                
-                System.out.println(indent + "    数据点" + point + ":");
-                System.out.println(indent + "      当前层级(" + node.optimalBits + "位): Z=" + nodeZOrder + 
-                                 " (二进制:" + String.format("%" + (node.optimalBits * 2) + "s", 
-                                 Long.toBinaryString(nodeZOrder)).replace(' ', '0') + ")");
-                
-                // 对比不同位数下的Z地址
-                for (int bits = 1; bits <= 4; bits++) {
-                    if (bits != node.optimalBits) {
-                        long otherZOrder = ZOrderUtils.computeZOrderWithBits(point, bits);
-                        String binary = String.format("%" + (bits * 2) + "s", Long.toBinaryString(otherZOrder)).replace(' ', '0');
-                        System.out.println(indent + "      如果用" + bits + "位编码: Z=" + otherZOrder + 
-                                         " (二进制:" + binary + ")");
-                    }
-                }
-                System.out.println(indent + "      → 可见不同层级使用不同位数得到不同的Z地址");
+            // 叶子节点：显示学习模型和Z地址数组
+            System.out.println(indent + "  叶子节点 " + node);
+            if (node.fitResult != null) {
+                System.out.println(indent + "    学习模型: position = " + 
+                                 String.format("%.4f", node.fitResult.slope) + " × Z地址 + " + 
+                                 String.format("%.4f", node.fitResult.intercept) + 
+                                 " (R²=" + String.format("%.4f", node.fitResult.rSquared) + ")");
             }
             
-            if (node.zOrderArray.length > 3) {
-                System.out.println(indent + "    ... 还有" + (node.zOrderArray.length - 3) + "个点");
+            System.out.print(indent + "    Z地址数组: [");
+            for (int i = 0; i < Math.min(10, node.zOrderArray.length); i++) {
+                if (i > 0) System.out.print(", ");
+                System.out.print(node.zOrderArray[i]);
             }
+            if (node.zOrderArray.length > 10) {
+                System.out.print(", ...");
+            }
+            System.out.println("]");
+            System.out.println(indent + "    数据点数: " + node.points.size() + "个");
+            
         } else if (!node.isLeaf) {
+            // 内部节点：显示学习模型
             System.out.println(indent + "  内部节点，包含" + node.children.size() + "个子节点");
+            if (node.hasLearnedModel && node.fitResult != null) {
+                System.out.println(indent + "    学习模型: 子节点索引 = " + 
+                                 String.format("%.4f", node.fitResult.slope) + " × Z地址 + " + 
+                                 String.format("%.4f", node.fitResult.intercept) + 
+                                 " (R²=" + String.format("%.4f", node.fitResult.rSquared) + ")");
+            }
             
             // 递归展示子节点
             for (AdaptiveZOrderNode child : node.children) {
