@@ -1508,7 +1508,7 @@ public class AdaptiveZOrder {
         
         // 展示分层Z地址概念
         System.out.println("\n=== 分层Z地址概念演示 ===");
-        demonstrateHierarchicalZOrder(tree.getRoot(), 1);
+        demonstrateHierarchicalZOrder(tree.getRoot(), 4);
     }
     
     // 演示分层Z地址概念
@@ -1628,7 +1628,7 @@ public class AdaptiveZOrder {
         System.out.println("=== 自适应Z-order树结构测试 ===\n");
         
         // 测试10×10网格稀疏分布数据集
-        Point2D[] sparse10x10Dataset = loadDataset("src/data/grid_10x10_sparse_dataset.csv", 80);
+        Point2D[] sparse10x10Dataset = loadDataset("src/data/grid_10x10_sparse_dataset.csv",1000);
         
         if (sparse10x10Dataset != null) {
             System.out.println("\n=== 10×10网格稀疏分布数据集测试 ===");
@@ -1752,7 +1752,8 @@ public class AdaptiveZOrder {
                 line = line.trim();
                 if (line.isEmpty()) continue;
                 
-                String[] parts = line.split(",");
+                // 支持逗号分隔和空格分隔
+                String[] parts = line.split("[,\\s]+");
                 if (parts.length >= 2) {
                     try {
                         long x = Long.parseLong(parts[0].trim());
