@@ -16,6 +16,12 @@ public class AdaptiveZOrder {
         public long zOrderValue;                    // 节点的Z-order值
         public boolean isLeaf;                      // 是否为叶子节点
         
+        // 节点存储信息
+        public int zArrayLength;                    // Z地址数组长度（存储在节点中）
+        public int nodeOptimalBits;                 // 节点的最优位数（存储在节点中）
+        
+        // 节点的MBR（最小边界矩形）信息已经通过minX, maxX, minY, maxY存储
+        
         // 数据存储
         public List<Point2D> points;               // 存储的数据点
         public Point2D center;                     // 节点中心点
@@ -43,6 +49,8 @@ public class AdaptiveZOrder {
             this.isLeaf = false;
             this.zOrderValue = 0; // 根节点Z值为0
             this.hasLearnedModel = false;
+            this.zArrayLength = 0; // 初始化Z数组长度
+            this.nodeOptimalBits = 0; // 初始化节点最优位数
         }
         
         // 构造函数：子节点
@@ -59,6 +67,8 @@ public class AdaptiveZOrder {
             this.isLeaf = false;
             this.zOrderValue = zOrderValue;
             this.hasLearnedModel = false;
+            this.zArrayLength = 0; // 初始化Z数组长度
+            this.nodeOptimalBits = 0; // 初始化节点最优位数
         }
         
         // 添加数据点
@@ -91,8 +101,90 @@ public class AdaptiveZOrder {
         public void setAsLeaf(int finalOptimalBits) {
             this.isLeaf = true;
             this.optimalBits = finalOptimalBits;
+            this.nodeOptimalBits = finalOptimalBits; // 存储节点的最优位数
             // 叶子节点需要构建学习模型
             buildLearnedModel();
+        }
+        
+        // 移除二进制模式相关方法，直接使用MBR边界信息
+        
+        // 移除二进制模式坐标设置方法
+        
+        // 移除二进制模式设置方法，叶子节点直接使用MBR边界
+        
+        // 移除Z-order值二进制模式设置方法
+        
+        /**
+         * 获取叶子节点覆盖的二维空间范围（直接使用MBR）
+         * @return 二维空间范围 [minX, maxX, minY, maxY]
+         */
+        public long[] getNodeSpatialRange() {
+            return new long[]{minX, maxX, minY, maxY};
+        }
+        
+        /**
+         * 检查节点的空间范围是否与查询矩形相交
+         * @param queryMinX 查询矩形最小X
+         * @param queryMaxX 查询矩形最大X
+         * @param queryMinY 查询矩形最小Y
+         * @param queryMaxY 查询矩形最大Y
+         * @return true如果相交，false如果不相交
+         */
+        public boolean nodeIntersectsQuery(long queryMinX, long queryMaxX, 
+                                         long queryMinY, long queryMaxY) {
+            // 检查两个矩形是否相交
+            boolean intersects = !(queryMaxX < minX || queryMinX > maxX || 
+                                 queryMaxY < minY || queryMinY > maxY);
+            
+            return intersects;
+        }
+        
+        /**
+         * 计算节点空间范围与查询矩形的相交区域
+         * @param queryMinX 查询矩形最小X
+         * @param queryMaxX 查询矩形最大X
+         * @param queryMinY 查询矩形最小Y
+         * @param queryMaxY 查询矩形最大Y
+         * @return 相交区域 [minX, maxX, minY, maxY]，如果不相交返回null
+         */
+        public long[] calculateIntersectionRange(long queryMinX, long queryMaxX, 
+                                               long queryMinY, long queryMaxY) {
+            // 检查是否相交
+            if (queryMaxX < minX || queryMinX > maxX || 
+                queryMaxY < minY || queryMinY > maxY) {
+                return null; // 不相交
+            }
+            
+            // 计算相交区域
+            long intersectionMinX = Math.max(queryMinX, minX);
+            long intersectionMaxX = Math.min(queryMaxX, maxX);
+            long intersectionMinY = Math.max(queryMinY, minY);
+            long intersectionMaxY = Math.min(queryMaxY, maxY);
+            
+            return new long[]{intersectionMinX, intersectionMaxX, intersectionMinY, intersectionMaxY};
+        }
+        
+        /**
+         * 根据相交区域计算精确的Z地址查询范围
+         * @param intersectionRange 相交区域 [minX, maxX, minY, maxY]
+         * @param maxBitsInDataset 数据集的最大位数
+         * @return Z地址范围 [minZ, maxZ]
+         */
+        public long[] calculateIntersectionZRange(long[] intersectionRange, int maxBitsInDataset) {
+            if (intersectionRange == null) {
+                return null;
+            }
+            
+            long minX = intersectionRange[0];
+            long maxX = intersectionRange[1];
+            long minY = intersectionRange[2];
+            long maxY = intersectionRange[3];
+            
+            // 计算相交区域左下角和右上角的Z地址
+            long minZ = ZOrderUtils.computeZOrderWithBits(minX, minY, maxBitsInDataset);
+            long maxZ = ZOrderUtils.computeZOrderWithBits(maxX, maxY, maxBitsInDataset);
+            
+            return new long[]{minZ, maxZ};
         }
         
         // 获取节点的空间范围大小
@@ -125,6 +217,22 @@ public class AdaptiveZOrder {
                 }
             }
             return leaves;
+        }
+        
+        // 获取节点存储信息
+        public String getStorageInfo() {
+            StringBuilder info = new StringBuilder();
+            info.append("深度=").append(depth);
+            info.append(", 最优位数=").append(nodeOptimalBits);
+            info.append(", Z数组长度=").append(zArrayLength);
+            info.append(", MBR=[").append(minX).append(",").append(maxX).append("]x[").append(minY).append(",").append(maxY).append("]");
+            
+            if (isLeaf) {
+                info.append(", 数据点数=").append(points.size());
+            } else {
+                info.append(", 子节点数=").append(children.size());
+            }
+            return info.toString();
         }
         
         // 构建学习模型（为节点创建线性拟合模型和Z地址数组）
@@ -167,6 +275,9 @@ public class AdaptiveZOrder {
                 zOrderArray[i] = zOrderPairs.get(i).zOrder;
                 sortedPoints[i] = zOrderPairs.get(i).point;
             }
+            
+            // 存储Z数组长度到节点中
+            this.zArrayLength = zOrderArray.length;
             
             // 第四步：构建线性拟合模型 (position = a * z_order + b)
             if (zOrderArray.length >= 2) {
@@ -224,6 +335,10 @@ public class AdaptiveZOrder {
                     zOrders[i] = childRanges.get(i).nodeZOrder;
                 }
                 
+                // 为内部节点创建Z地址数组（基于子节点的Z地址）
+                this.zOrderArray = zOrders.clone();
+                this.zArrayLength = zOrders.length; // 存储内部节点的Z数组长度
+                
                 fitResult = buildLinearModel(zOrders);
                 hasLearnedModel = true;
                 
@@ -231,6 +346,7 @@ public class AdaptiveZOrder {
                                  String.format("%.6f", fitResult.slope) + " * z_order + " + 
                                  String.format("%.6f", fitResult.intercept) + 
                                  " (R² = " + String.format("%.4f", fitResult.rSquared) + ")");
+                System.out.println("      内部节点Z数组长度: " + this.zArrayLength);
             }
         }
         
@@ -370,11 +486,15 @@ public class AdaptiveZOrder {
         
         @Override
         public String toString() {
-            return String.format("Node[D%d, Z=%d, %s, %d点, %s]", 
+            String typeInfo = isLeaf ? "叶子" : children.size() + "子";
+            String extraInfo = ", Z数组长度=" + zArrayLength; // 所有节点都显示Z数组长度
+            return String.format("Node[D%d, Z=%d, %s, %d点, %s, 最优位数=%d%s]", 
                                depth, zOrderValue, 
                                "Space[" + minX + "," + maxX + "]x[" + minY + "," + maxY + "]",
                                points.size(), 
-                               isLeaf ? "叶子" : children.size() + "子");
+                               typeInfo,
+                               nodeOptimalBits,
+                               extraInfo);
         }
     }
     
@@ -391,6 +511,39 @@ public class AdaptiveZOrder {
         public String toString() {
             return String.format("TreeStats{总节点=%d, 叶子节点=%d, 内部节点=%d, 总数据点=%d, 最大深度=%d, 最小深度=%d}",
                                totalNodes, leafNodes, internalNodes, totalPoints, maxDepth, minDepth);
+        }
+    }
+    
+    // 单元格类（用于空间分割）
+    public static class Cell {
+        public long minX, maxX, minY, maxY;
+        public List<Point2D> points;
+        
+        public Cell(long minX, long maxX, long minY, long maxY) {
+            this.minX = minX;
+            this.maxX = maxX;
+            this.minY = minY;
+            this.maxY = maxY;
+            this.points = new ArrayList<>();
+        }
+        
+        public void addPoint(Point2D point) {
+            points.add(point);
+        }
+        
+        public boolean hasData() {
+            return !points.isEmpty();
+        }
+        
+        public Point2D getCenter() {
+            long centerX = (minX + maxX) / 2;
+            long centerY = (minY + maxY) / 2;
+            return new Point2D(centerX, centerY);
+        }
+        
+        @Override
+        public String toString() {
+            return String.format("Cell[%d,%d]x[%d,%d]", minX, maxX, minY, maxY);
         }
     }
     
@@ -436,9 +589,16 @@ public class AdaptiveZOrder {
             // 递归构建树
             buildSubTree(root, points, minX, maxX, minY, maxY, 0);
             
+            // 为根节点设置基本的Z数组长度（如果还没有设置的话）
+            if (root.zArrayLength == 0 && !root.children.isEmpty()) {
+                root.zArrayLength = root.children.size();
+            }
+            
             // 为所有节点构建学习模型
             System.out.println("\n=== 构建学习模型 ===");
             buildAllLearnedModels(root);
+            
+            // 叶子节点直接使用MBR边界，无需设置二进制模式
             
             System.out.println("树构建完成！");
             printTreeStats();
@@ -478,6 +638,9 @@ public class AdaptiveZOrder {
             int optimalBits = testBinaryProgression(points, minX, maxX, minY, maxY, 
                                                   globalMaxBits, depth, indent, startFromBits);
             node.optimalBits = optimalBits;
+            node.nodeOptimalBits = optimalBits; // 存储节点的最优位数
+            
+            // 注意：二进制位模式将在叶子节点构建学习模型时设置（来自父节点Z数组）
             
             if (optimalBits <= 0 || optimalBits >= this.globalOptimalBits) {
                 System.out.println(indent + "最优位数不适合继续分割或已达到全局最大位数，设为叶子节点");
@@ -526,7 +689,13 @@ public class AdaptiveZOrder {
             }
             
             System.out.println(indent + "节点构建完成，共" + node.children.size() + "个子节点");
+            
+            // 为内部节点设置基本的Z数组长度（即使没有学习模型）
+            if (!node.isLeaf && node.zArrayLength == 0) {
+                node.zArrayLength = node.children.size(); // 内部节点的Z数组长度至少等于子节点数量
+            }
         }
+        
         
         // 为所有节点构建学习模型（后序遍历：先构建叶子节点，再构建内部节点）
         private void buildAllLearnedModels(AdaptiveZOrderNode node) {
@@ -548,6 +717,8 @@ public class AdaptiveZOrder {
                 node.buildInternalNodeModel();
             }
         }
+        
+        // 移除二进制模式设置方法，叶子节点直接使用MBR
         
         
         // 获取根节点
@@ -1509,6 +1680,10 @@ public class AdaptiveZOrder {
         // 展示分层Z地址概念
         System.out.println("\n=== 分层Z地址概念演示 ===");
         demonstrateHierarchicalZOrder(tree.getRoot(), 4);
+        
+        // 打印所有节点的存储信息
+        System.out.println("\n=== 节点存储信息汇总 ===");
+        printAllNodeStorageInfo(tree.getRoot());
     }
     
     // 演示分层Z地址概念
@@ -1516,11 +1691,12 @@ public class AdaptiveZOrder {
         if (node == null || node.depth > maxDepth) return;
         
         String indent = "  ".repeat(node.depth);
-        System.out.println(indent + "层级" + node.depth + " [最优位数=" + node.optimalBits + "位]:");
+        System.out.println(indent + "层级" + node.depth + " [节点最优位数=" + node.nodeOptimalBits + "位]:");
         
         if (node.isLeaf && node.hasLearnedModel && node.zOrderArray != null) {
             // 叶子节点：显示学习模型和Z地址数组
             System.out.println(indent + "  叶子节点 " + node);
+            System.out.println(indent + "    存储信息: " + node.getStorageInfo());
             if (node.fitResult != null) {
                 System.out.println(indent + "    学习模型: position = " + 
                                  String.format("%.4f", node.fitResult.slope) + " × Z地址 + " + 
@@ -1537,11 +1713,12 @@ public class AdaptiveZOrder {
                 System.out.print(", ...");
             }
             System.out.println("]");
-            System.out.println(indent + "    数据点数: " + node.points.size() + "个");
+            System.out.println(indent + "    实际Z数组长度: " + node.zArrayLength + ", 数据点数: " + node.points.size() + "个");
             
         } else if (!node.isLeaf) {
             // 内部节点：显示学习模型
             System.out.println(indent + "  内部节点，包含" + node.children.size() + "个子节点");
+            System.out.println(indent + "    存储信息: " + node.getStorageInfo());
             if (node.hasLearnedModel && node.fitResult != null) {
                 System.out.println(indent + "    学习模型: 子节点索引 = " + 
                                  String.format("%.4f", node.fitResult.slope) + " × Z地址 + " + 
@@ -1549,9 +1726,39 @@ public class AdaptiveZOrder {
                                  " (R²=" + String.format("%.4f", node.fitResult.rSquared) + ")");
             }
             
+            // 如果内部节点有Z地址数组，也显示出来
+            if (node.zOrderArray != null && node.zOrderArray.length > 0) {
+                System.out.print(indent + "    内部节点Z地址数组: [");
+                for (int i = 0; i < Math.min(10, node.zOrderArray.length); i++) {
+                    if (i > 0) System.out.print(", ");
+                    System.out.print(node.zOrderArray[i]);
+                }
+                if (node.zOrderArray.length > 10) {
+                    System.out.print(", ...");
+                }
+                System.out.println("]");
+                System.out.println(indent + "    实际Z数组长度: " + node.zArrayLength);
+            }
+            
             // 递归展示子节点
             for (AdaptiveZOrderNode child : node.children) {
                 demonstrateHierarchicalZOrder(child, maxDepth);
+            }
+        }
+    }
+    
+    // 打印所有节点的存储信息
+    public static void printAllNodeStorageInfo(AdaptiveZOrderNode node) {
+        if (node == null) return;
+        
+        String indent = "  ".repeat(node.depth);
+        String nodeType = node.isLeaf ? "叶子" : "内部";
+        System.out.println(indent + nodeType + "节点 [" + node.getStorageInfo() + "]");
+        
+        // 递归打印子节点
+        if (!node.isLeaf) {
+            for (AdaptiveZOrderNode child : node.children) {
+                printAllNodeStorageInfo(child);
             }
         }
     }
